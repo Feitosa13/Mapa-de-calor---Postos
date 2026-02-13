@@ -8,7 +8,7 @@ from folium.plugins import HeatMap, MarkerCluster
 from streamlit_folium import st_folium
 
 # ✅ Link "Publicar na Web" (CSV)
-SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSkRLXhmtl4pogs_exuOvZYVctyVFksBQC-KwUkKLXQa0GRZIedH9CORgQc0cgEJbOpBNrTvZR8T1l6/pub?output=csv"
+SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSkRLXhmtl4pogs_exu0vZYVCtyVFksBQC-KwUkKLXQqOGRZledH9C0RgQc0cgEJbOpBNrTvZR8T1I6/pub?output=csv"
 
 st.set_page_config(page_title="Mapa de Calor - Postos", layout="wide")
 
@@ -132,4 +132,5 @@ folium.LayerControl(collapsed=False).add_to(m)
 st_folium(m, use_container_width=True, height=700)
 
 st.caption("Atualiza lendo o CSV publicado (cache ~60s).")
+
 
