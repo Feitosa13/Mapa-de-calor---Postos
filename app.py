@@ -1,58 +1,80 @@
+import re
 import pandas as pd
-import numpy as np
 import streamlit as st
 import folium
 from folium.plugins import HeatMap, MarkerCluster
 from streamlit_folium import st_folium
 
-SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1IRlSnJIC2S_z4Mcx9iCnjUhvByDuOXASsGWbZGVhLhM/export?format=csv&gid=0"
+# ✅ Seu link "Publicar na Web" (CSV)
+SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSkRLXhmtl4pogs_exuOvZYVctyVFksBQC-KwUkKLXQa0GRZIedH9CORgQc0cgEJbOpBNrTvZR8T1l6/pub?output=csv"
 
 st.set_page_config(page_title="Mapa de Calor - Postos", layout="wide")
 
-@st.cache_data(ttl=60)  # atualiza a cada 60s
+@st.cache_data(ttl=60)
 def load_data(url: str) -> pd.DataFrame:
     df = pd.read_csv(url)
-    # Normaliza nomes (caso venham com espaços/acentos)
     df.columns = [c.strip().lower() for c in df.columns]
     return df
 
+def parse_coord(val) -> float:
+    s = str(val).strip()
+    if s == "" or s.lower() == "nan":
+        return float("nan")
+    s = s.replace(",", ".")
+    if s.count(".") > 1:  # ex: -13.010.079 -> -13.010079
+        neg = s.startswith("-")
+        s2 = s[1:] if neg else s
+        parts = s2.split(".")
+        s = ("-" if neg else "") + parts[0] + "." + "".join(parts[1:])
+    s = re.sub(r"[^0-9\.\-]", "", s)
+    try:
+        return float(s)
+    except:
+        return float("nan")
+
 df = load_data(SHEET_CSV_URL)
 
-# Esperado: etiqueta, lat, long, ocorrencias (ou ocorrências)
-# Ajuste aqui se o nome da coluna for diferente no seu Sheets:
-col_etiqueta = "etiqueta"
+# ✅ SEUS NOMES DE COLUNA
+col_posto = "posto"
 col_lat = "lat"
 col_lon = "long"
-col_occ = "ocorrencias" if "ocorrencias" in df.columns else "ocorrências"
+col_reg = "registros"
 
-# Converte coordenadas (caso venham como texto)
-def to_float(series):
-    return pd.to_numeric(series.astype(str).str.replace(",", ".", regex=False), errors="coerce")
+# validação rápida
+need = [col_posto, col_lat, col_lon, col_reg]
+missing = [c for c in need if c not in df.columns]
+if missing:
+    st.error(f"Faltando coluna(s): {missing}")
+    st.write("Colunas encontradas:", df.columns.tolist())
+    st.stop()
 
-df[col_lat] = to_float(df[col_lat])
-df[col_lon] = to_float(df[col_lon])
-df[col_occ] = pd.to_numeric(df[col_occ], errors="coerce").fillna(0)
+df[col_lat] = df[col_lat].apply(parse_coord)
+df[col_lon] = df[col_lon].apply(parse_coord)
+df[col_reg] = pd.to_numeric(df[col_reg], errors="coerce").fillna(0)
 
 df = df.dropna(subset=[col_lat, col_lon])
 
-st.title("Mapa de calor (satélite) — Postos x Ocorrências")
+st.title("Mapa de calor (satélite) — Postos x Registros")
 
-# Filtros
 with st.sidebar:
     st.header("Filtros")
-    min_occ, max_occ = int(df[col_occ].min()), int(df[col_occ].max())
-    occ_range = st.slider("Faixa de ocorrências", min_occ, max_occ, (min_occ, max_occ))
-    show_markers = st.checkbox("Mostrar marcadores clicáveis", True)
+    min_r = int(df[col_reg].min())
+    max_r = int(df[col_reg].max())
+    r_range = st.slider("Faixa de registros", min_r, max_r, (min_r, max_r))
+    show_markers = st.checkbox("Mostrar pontos clicáveis", True)
     heat_radius = st.slider("Raio do heatmap", 10, 80, 35)
     heat_blur = st.slider("Blur do heatmap", 10, 80, 25)
+    zoom = st.slider("Zoom inicial", 10, 18, 13)
 
-df_f = df[(df[col_occ] >= occ_range[0]) & (df[col_occ] <= occ_range[1])]
+df_f = df[(df[col_reg] >= r_range[0]) & (df[col_reg] <= r_range[1])]
 
-center = [float(df_f[col_lat].mean()), float(df_f[col_lon].mean())] if len(df_f) else [float(df[col_lat].mean()), float(df[col_lon].mean())]
+center = [
+    float(df_f[col_lat].mean()) if len(df_f) else float(df[col_lat].mean()),
+    float(df_f[col_lon].mean()) if len(df_f) else float(df[col_lon].mean())
+]
 
-m = folium.Map(location=center, zoom_start=13, control_scale=True, tiles=None)
+m = folium.Map(location=center, zoom_start=zoom, control_scale=True, tiles=None)
 
-# Satélite (Esri)
 folium.TileLayer(
     tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     attr="Tiles © Esri",
@@ -61,7 +83,6 @@ folium.TileLayer(
     control=True,
 ).add_to(m)
 
-# Rótulos (opcional)
 folium.TileLayer(
     tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
     attr="Esri",
@@ -71,30 +92,28 @@ folium.TileLayer(
     opacity=0.9,
 ).add_to(m)
 
-# Heatmap ponderado por ocorrências
-heat = df_f[[col_lat, col_lon, col_occ]].values.tolist()
+heat = df_f[[col_lat, col_lon, col_reg]].values.tolist()
 HeatMap(heat, radius=heat_radius, blur=heat_blur, max_zoom=17, name="Mapa de calor").add_to(m)
 
-# Marcadores clicáveis
 if show_markers:
     cluster = MarkerCluster(name="Postos (clicáveis)").add_to(m)
     for _, r in df_f.iterrows():
-        etiqueta = r.get(col_etiqueta, "")
-        occ = int(r[col_occ]) if pd.notna(r[col_occ]) else 0
+        posto = str(r[col_posto]).strip()
+        reg = int(r[col_reg]) if pd.notna(r[col_reg]) else 0
         popup = folium.Popup(
-            f"<b>Posto:</b> {etiqueta}<br><b>Ocorrências:</b> {occ}<br><b>Coords:</b> {r[col_lat]:.6f},{r[col_lon]:.6f}",
+            f"<b>Posto:</b> {posto}<br><b>Registros:</b> {reg}<br><b>Coords:</b> {r[col_lat]:.6f},{r[col_lon]:.6f}",
             max_width=350
         )
         folium.CircleMarker(
             location=[r[col_lat], r[col_lon]],
             radius=6,
-            tooltip=f"{etiqueta} ({occ})",
+            tooltip=f"{posto} ({reg})",
             popup=popup,
             fill=True
         ).add_to(cluster)
 
 folium.LayerControl(collapsed=False).add_to(m)
-
 st_folium(m, use_container_width=True, height=700)
 
-st.caption("Atualização automática: o app recarrega dados do Google Sheets (cache de 60s).")
+st.caption("Atualização automática: lê o CSV publicado no Google Sheets (cache ~60s).")
+
