@@ -134,3 +134,4 @@ st_folium(m, use_container_width=True, height=700)
 st.caption("Atualiza lendo o CSV publicado (cache ~60s).")
 
 
+
